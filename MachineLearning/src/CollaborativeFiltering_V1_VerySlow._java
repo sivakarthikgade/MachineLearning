@@ -1,0 +1,162 @@
+package org.siva.machinelearning;
+
+import java.io.BufferedReader;
+import java.io.BufferedWriter;
+import java.io.FileReader;
+import java.io.FileWriter;
+import java.util.HashMap;
+import java.util.Map;
+
+public class CollaborativeFiltering {
+
+	private static final String LOG_FILE = "CollaborativeFiltering_Log.txt";
+	private BufferedWriter bw = null;
+	public String trainFile;
+	public String testFile;
+	public Map<Double,Map<Double,Double>> v, w, tv;
+	public Map<Double,Double> vAvg;
+	
+	public CollaborativeFiltering(String trainFile, String testFile) {
+		this.trainFile = trainFile;
+		this.testFile = testFile;
+		v = new HashMap<Double,Map<Double,Double>>();
+		w = new HashMap<Double,Map<Double,Double>>();
+		tv = new HashMap<Double,Map<Double,Double>>();
+		vAvg = new HashMap<Double,Double>();
+	}
+	
+	public void execute() throws Exception {
+		String str = null;
+		String[] tokens;
+
+		BufferedReader br = new BufferedReader(new FileReader(trainFile));
+		while((str = br.readLine()) != null) {
+			tokens = str.split("[,\\s]+");
+			if(!v.containsKey(Double.parseDouble(tokens[1]))) {
+				v.put(Double.parseDouble(tokens[1]), new HashMap<Double,Double>());
+			}
+			v.get(Double.parseDouble(tokens[1])).put(Double.parseDouble(tokens[0]), Double.parseDouble(tokens[2]));
+		}
+		br.close();
+		log("users size: "+v.keySet().size());
+		
+		for(double user: v.keySet()) {
+			Map<Double,Double> rateList = v.get(user);
+			double sum = 0, cnt = 0, avg = 0;
+			cnt = rateList.size();
+			for(double movie: rateList.keySet()) {
+				sum = sum + rateList.get(movie);
+			}
+			avg = sum/cnt;
+			vAvg.put(user,avg);
+		}
+		log("vAvg size: "+vAvg.size());
+		
+		for(double i: v.keySet()) {
+			Map<Double,Double> userRateList = v.get(i);
+			for(double j: v.keySet()) {
+				if(i == j) {
+					continue;
+				}
+				if(w.get(j) != null && w.get(j).get(i) != null) {
+					if(w.get(i) == null) {
+						w.put(i, new HashMap<Double,Double>());
+					}
+					w.get(i).put(j, w.get(j).get(i));
+					log("correlation for ("+i+","+j+") is: "+w.get(j).get(i));
+					continue;
+				}
+				double d1 = 0, d2 = 0, n1 = 0, val = 0;
+				for(double movie: userRateList.keySet()) {
+					if(v.get(i).get(movie) != null && v.get(j).get(movie) != null) {
+						d1 = d1 + Math.pow((v.get(i).get(movie) - vAvg.get(i)),2);
+						d2 = d2 + Math.pow((v.get(j).get(movie) - vAvg.get(j)),2);
+						n1 = n1 + (v.get(i).get(movie) - vAvg.get(i))*(v.get(j).get(movie) - vAvg.get(j));
+					}
+				}
+				if(w.get(i) == null) {
+					w.put(i, new HashMap<Double,Double>());
+				}
+				if(n1 == 0 || d1 == 0 || d2 == 0) {
+					val = 0;
+				} else {
+					val = n1/Math.sqrt(d1*d2);
+				}
+				w.get(i).put(j, val);
+				log("correlation for ("+i+","+j+") is: "+val);
+				flushLogger();
+			}
+		}
+		log("End of training");
+	}
+	
+	public void test() throws Exception {
+		String str = null;
+		String tokens[];
+		double MAE = 0, testSampleCnt = 0, user = 0, movie = 0, p = 0, k = 0, sum = 0;
+		
+		BufferedReader br = new BufferedReader(new FileReader(testFile));
+		while((str = br.readLine()) != null) {
+			tokens = str.split("[,\\s]+");
+			user = Double.parseDouble(tokens[1]);
+			movie = Double.parseDouble(tokens[0]);
+			if(vAvg.get(user) == null) {
+				continue;
+			}
+			p = vAvg.get(user);
+			sum = 0; k = 0;
+			for(double i: w.get(user).keySet()) {
+				if(v.get(i).get(movie) != null) {
+					sum = sum + w.get(user).get(i)*(v.get(i).get(movie) - vAvg.get(i));
+					k = k + w.get(user).get(i);
+				}
+			}
+			if(k != 0) {
+				log("sum/k: "+(sum/k));
+				p = p + (sum/k);
+			}
+			MAE = MAE + Math.abs(p - Double.parseDouble(tokens[2]));
+			testSampleCnt++;
+		}
+		MAE = MAE/testSampleCnt;
+		log("Mean Absolute Error: "+MAE);
+	}
+
+	public static void main(String[] args) throws Exception {
+		double startTime = System.currentTimeMillis();
+
+		String trainFile = args[0];
+		String testFile = args[1];
+
+		CollaborativeFiltering filter = new CollaborativeFiltering(trainFile, testFile);
+		filter.initializeLogger(false);
+		try {
+			filter.execute();
+			filter.log("CollaborativeFiltering: Total execution time->"+((double)(System.currentTimeMillis()-startTime)/1000)+" secs.");
+		} catch(Exception e) {
+			throw e;
+		} finally {
+			filter.flushLogger();
+			filter.closeLogger();
+		}
+	}
+
+	private void initializeLogger(boolean append) throws Exception {
+		bw = new BufferedWriter(new FileWriter(CollaborativeFiltering.LOG_FILE, append));
+	}
+	
+	private void log(String str) throws Exception {
+		System.out.println(str);
+		bw.write(str);
+		bw.newLine();
+	}
+	
+	private void flushLogger() throws Exception {
+		bw.flush();
+	}
+	
+	private void closeLogger() throws Exception {
+		bw.flush();
+		bw.close();
+	}
+}

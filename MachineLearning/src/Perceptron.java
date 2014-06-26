@@ -1,0 +1,405 @@
+
+/**
+ * @author Siva Karthik Gade
+ */
+
+import java.io.BufferedReader;
+import java.io.BufferedWriter;
+import java.io.File;
+import java.io.FileNotFoundException;
+import java.io.FileReader;
+import java.io.FileWriter;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+
+//enum Class {
+//	SPAM,
+//	HAM
+//}
+
+public class Perceptron {
+
+	private static final String LOG_FILE = "Perceptron_Log.txt";
+	private static final String STOP_WORDS_FILE = "Stop_Words.txt";
+	private BufferedWriter bw = null;
+	private String trainingFolder = null;
+	private String testFolder = null;
+	private Map<Class, Integer> docCntPerClass = new HashMap<Class, Integer>();
+	private Set<String> vocabulary = new HashSet<String>();
+	private List<String> vocab = new ArrayList<String>();
+	private Set<String> stopWords = new HashSet<String>();
+	private boolean ignoreStopWords = false;
+	private Map<Integer,Map<Integer,Integer>> data = null;
+	private double eeta;
+	private int convergenceLimit;
+	private double[] w = null;
+
+	public Perceptron() {
+	}
+	
+	public Perceptron(String trainingFolder, String testFolder, int converganceLimit, double eeta, boolean ignoreStopWords) {
+		this.trainingFolder = trainingFolder;
+		this.testFolder = testFolder;
+		this.convergenceLimit = converganceLimit;
+		this.eeta = eeta;
+		this.ignoreStopWords = ignoreStopWords;
+	}
+	
+	public double getEeta() {
+		return eeta;
+	}
+
+	public void setEeta(double eeta) {
+		this.eeta = eeta;
+	}
+
+	public boolean isIgnoreStopWords() {
+		return this.ignoreStopWords;
+	}
+
+	public void setIgnoreStopWords(boolean ignoreStopWords) {
+		this.ignoreStopWords = ignoreStopWords;
+	}
+
+	public double getMaxConvergenceLimit() {
+		return convergenceLimit;
+	}
+
+	public void setMaxConvergenceLimit(int convergenceLimit) {
+		this.convergenceLimit = convergenceLimit;
+	}
+
+	public Map<Integer, Map<Integer, Integer>> getData() {
+		return data;
+	}
+
+	public void setData(Map<Integer, Map<Integer,Integer>> data) {
+		this.data = data;
+	}
+
+	public Set<String> getStopWords() {
+		return stopWords;
+	}
+
+	public void setStopWords(Set<String> stopWords) {
+		this.stopWords = stopWords;
+	}
+
+	public Map<Class, Integer> getDocCntPerClass() {
+		return docCntPerClass;
+	}
+
+	public void setDocCntPerClass(Map<Class, Integer> docCntPerClass) {
+		this.docCntPerClass = docCntPerClass;
+	}
+
+	public Set<String> getVocabulary() {
+		return vocabulary;
+	}
+
+	public void setVocabulary(Set<String> vocabulary) {
+		this.vocabulary = vocabulary;
+	}
+
+	public String getTrainingFolder() {
+		return trainingFolder;
+	}
+
+	public void setTrainingFolder(String trainingFolder) {
+		this.trainingFolder = trainingFolder;
+	}
+
+	public String getTestFolder() {
+		return testFolder;
+	}
+
+	public void setTestFolder(String testFolder) {
+		this.testFolder = testFolder;
+	}
+	
+	public void loadStopWords() throws Exception {
+		BufferedReader br = null;
+		try {
+			br = new BufferedReader(new FileReader(Perceptron.STOP_WORDS_FILE));
+		} catch(FileNotFoundException e) {
+			throw new Exception("Please copy Stop_Words.txt file into the same folder as Perceptron.java");
+		}
+		String str = null;
+		while((str=br.readLine())!=null) {
+			getStopWords().add(str.toLowerCase());
+		}
+		br.close();
+		//log("StopWord count: "+getStopWords().size());
+	}
+	
+	public void train() throws Exception {
+		int docCntPerCls = 0;
+		
+		//Load and doc counts per class vocabulary
+		for(Class c: Class.values()) {
+
+			String filePath = null;
+			File folder = null;
+			File[] listOfFiles = null;
+			String fileText = null, str = null, token = null;
+			BufferedReader br = null;
+			Collection<String> tokens = null;
+			Iterator<String> itr = null;
+			
+			folder = new File(getTrainingFolder()+File.separator+c.name());
+			listOfFiles = folder.listFiles();
+			
+			for(int i = 0; i < listOfFiles.length; i++) {
+				if(listOfFiles[i].isFile()) {
+					docCntPerCls++;
+					fileText = "";
+					filePath = listOfFiles[i].getAbsolutePath();
+					br = new BufferedReader(new FileReader(filePath));
+					while((str = br.readLine()) != null) {
+						fileText = fileText + " " + str;
+					}
+					br.close();
+					fileText = fileText.toLowerCase();
+					//fileText = fileText.replaceAll(getRegex(), " ");
+					tokens = new ArrayList<String>(Arrays.asList(fileText.toLowerCase().split("[\\s]+")));
+
+					if(isIgnoreStopWords()) {
+						itr = tokens.iterator();
+						while(itr.hasNext()) {
+							token = itr.next();
+							if(getStopWords().contains(token)) {
+								itr.remove();
+							}
+						}
+					}
+					getVocabulary().addAll(tokens);
+					vocab = new ArrayList<String>(getVocabulary());
+				}
+			}
+			getDocCntPerClass().put(c, docCntPerCls);
+			docCntPerCls = 0;
+		}
+
+		//Populate data array
+		int totalDocumentCnt = 0;
+		for(Class c: Class.values()) {
+			totalDocumentCnt += getDocCntPerClass().get(c);
+		}
+//		log("Perceptron: Dictionary population completed. size:"+vocab.size());
+//		log("Perceptron: Total docs in training:"+totalDocumentCnt);
+
+		data = new HashMap<Integer, Map<Integer, Integer>>();//new int[totalDocumentCnt][vocab.size()+2];
+
+		for(int i = 0; i < totalDocumentCnt; i++) {
+			data.put(i, new HashMap<Integer, Integer>());
+		}
+		
+		int docCntr = 0;
+		
+		for(Class c: Class.values()) {
+
+			File folder = new File(getTrainingFolder()+File.separator+c.name());
+			File[] listOfFiles = folder.listFiles();
+			
+			for(int i = 0; i < listOfFiles.length; i++) {
+				if(listOfFiles[i].isFile()) {
+					data.get(docCntr).put(0, 1);
+					BufferedReader br = new BufferedReader(new FileReader(listOfFiles[i].getAbsolutePath()));
+					String str = null;
+					String fileText = "", token = "";
+					Set<String> distinctTokens = new HashSet<String>();
+					List<String> tokens = new ArrayList<String>();
+					Iterator<String> itr = null;
+					while((str=br.readLine())!=null) {
+						fileText = fileText + " " + str;
+					}
+					br.close();
+					fileText = fileText.toLowerCase();
+					//fileText = fileText.replaceAll(getRegex(), " ");
+					tokens = new ArrayList<String>(Arrays.asList(fileText.toLowerCase().split("[\\s]+")));
+					if(isIgnoreStopWords()) {
+						itr = tokens.iterator();
+						while(itr.hasNext()) {
+							token = itr.next();
+							if(getStopWords().contains(token)) {
+								itr.remove();
+							}
+						}
+					}
+					distinctTokens.addAll(tokens);
+					itr = distinctTokens.iterator();
+					while(itr.hasNext()) {
+						token = itr.next();
+						int pos = vocab.indexOf(token);
+						int cnt = Collections.frequency(tokens, token);
+						data.get(docCntr).put(pos+1, cnt);
+						//data.get(docCntr).put(pos+1, 1);
+					}
+					data.get(docCntr).put(1+vocab.size(), (c == Class.SPAM ? 1 : -1));
+					docCntr++;
+				}
+			}
+		}
+		if(docCntr != totalDocumentCnt) {
+			throw new Exception("All samples are not processed. cnt1:"+totalDocumentCnt+", cnt2:"+docCntr+".");
+		}
+		
+		//Initialize o, w arrays
+		int o = 0;
+		w = new double[vocab.size()+1];
+		for(int i = 0; i < vocab.size()+1; i++) {
+			w[i] = (double)1/vocab.size();
+		}
+		
+		for(int i = 0; i < getMaxConvergenceLimit(); i++) {
+			for(int j = 0; j < totalDocumentCnt; j++) {
+
+				double l = 0;
+				for(int k: data.get(j).keySet()) {
+					if(k == vocab.size()+1) {
+						continue;
+					}
+					l = l + w[k]*data.get(j).get(k);
+				}
+				o = l>0?1:-1;
+			
+				for(int k: data.get(j).keySet()) {
+					if(k == vocab.size()+1) {
+						continue;
+					}
+					w[k] = w[k] + getEeta()*(data.get(j).get(vocab.size()+1)-o)*data.get(j).get(k);
+				}
+			}
+		}
+	}
+
+	public void test() throws Exception {
+		int correctCntSpam = 0, correctCntHam = 0;
+		int totalCnt = 0;
+		int[] testRecData = null;
+
+		for(Class c: Class.values()) {
+			File folder = new File(getTestFolder()+File.separator+c.name());
+			File[] listOfFiles = folder.listFiles();
+			
+			for(int i = 0; i < listOfFiles.length; i++) {
+				if(listOfFiles[i].isFile()) {
+					testRecData = new int[vocab.size()+1];
+					for(int j = 0; j < testRecData.length; j++) {
+						testRecData[j] = 0;
+					}
+					testRecData[0] = 1;
+					BufferedReader br = new BufferedReader(new FileReader(listOfFiles[i].getAbsolutePath()));
+					String str = null;
+					String fileText = "", token = "";
+					Set<String> distinctTokens = new HashSet<String>();
+					List<String> tokens = new ArrayList<String>();
+					Iterator<String> itr = null;
+					while((str=br.readLine())!=null) {
+						fileText = fileText + " " + str;
+					}
+					br.close();
+					fileText = fileText.toLowerCase();
+					//fileText = fileText.replaceAll(getRegex(), " ");
+					tokens = new ArrayList<String>(Arrays.asList(fileText.toLowerCase().split("[\\s]+")));
+					if(isIgnoreStopWords()) {
+						itr = tokens.iterator();
+						while(itr.hasNext()) {
+							token = itr.next();
+							if(getStopWords().contains(token)) {
+								itr.remove();
+							}
+						}
+					}
+					distinctTokens.addAll(tokens);
+					itr = distinctTokens.iterator();
+					while(itr.hasNext()) {
+						token = itr.next();
+						int pos = vocab.indexOf(token);
+						int cnt = Collections.frequency(tokens, token);
+						testRecData[pos+1] = cnt;
+						//testRecData[pos+1] = 1;
+					}
+					
+					//evaluate
+					double l = 0;
+					for(int j = 0; j < vocab.size()+1; j++) {
+						l = l + w[j]*testRecData[j];
+					}
+//					log("Test sample: "+totalCnt+"; (t="+(c==Class.SPAM?1:-1)+", o="+l+")");
+					if((l > 0) && (c == Class.SPAM)) {
+						correctCntSpam++;
+					}
+					if((l < 0) && (c == Class.HAM)) {
+						correctCntHam++;
+					}
+					totalCnt++;
+				}
+			}
+		}
+		log("Accuracy of perceptron classifier ("+(isIgnoreStopWords()?"excluding":"including")+" stopwords) is: "+((double)(correctCntSpam+correctCntHam)*100/totalCnt)+"("+correctCntSpam+","+correctCntHam+")");
+	}
+
+	public static void main(String[] args) throws Exception {
+		double startTime = System.currentTimeMillis();
+
+		String trainingFolder = args[0];
+		String testFolder = args[1];
+		int converganceLimit = Integer.parseInt(args[2]);
+		double learningRate = Double.parseDouble(args[3]);
+
+		Perceptron perceptron = null;
+		try {
+			perceptron = new Perceptron(trainingFolder, testFolder, converganceLimit, learningRate, false);
+			perceptron.initializeLogger(false);
+			perceptron.train();
+			perceptron.test();
+		} catch(Exception e) {
+			throw e;
+		} finally {
+			perceptron.flushLogger();
+			perceptron.closeLogger();
+		}
+		try {
+			perceptron = new Perceptron(trainingFolder, testFolder, converganceLimit, learningRate, true);
+			perceptron.initializeLogger(true);
+			perceptron.loadStopWords();
+			perceptron.train();
+			perceptron.test();
+			perceptron.log("SpamFilter: Total execution time->"+((double)(System.currentTimeMillis()-startTime)/1000)+" secs.");
+		} catch(Exception e) {
+			throw e;
+		} finally {
+			perceptron.flushLogger();
+			perceptron.closeLogger();
+		}
+		
+	}
+
+	private void initializeLogger(boolean append) throws Exception {
+		bw = new BufferedWriter(new FileWriter(Perceptron.LOG_FILE, append));
+	}
+	
+	private void log(String str) throws Exception {
+		System.out.println(str);
+		bw.write(str);
+		bw.newLine();
+	}
+	
+	private void flushLogger() throws Exception {
+		bw.flush();
+	}
+	
+	private void closeLogger() throws Exception {
+		bw.flush();
+		bw.close();
+	}
+}

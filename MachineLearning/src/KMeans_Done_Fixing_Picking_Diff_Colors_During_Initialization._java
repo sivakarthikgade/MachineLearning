@@ -1,0 +1,165 @@
+package org.siva.machinelearning;
+
+/*** Author :Vibhav Gogate
+The University of Texas at Dallas
+*****/
+
+import java.awt.Color;
+import java.awt.Graphics2D;
+import java.awt.image.BufferedImage;
+import java.io.File;
+import java.io.IOException;
+import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Set;
+
+import javax.imageio.ImageIO;
+ 
+
+public class KMeans {
+    public static void main(String [] args){
+	if (args.length < 3){
+	    System.out.println("Usage: Kmeans <input-image> <k> <output-image>");
+	    return;
+	}
+	try{
+	    BufferedImage originalImage = ImageIO.read(new File(args[0]));
+	    int k=Integer.parseInt(args[1]);
+	    BufferedImage kmeansJpg = kmeans_helper(originalImage,k);
+	    ImageIO.write(kmeansJpg, "jpg", new File(args[2])); 
+	    log("done!!!");
+	    
+	}catch(IOException e){
+	    System.out.println(e.getMessage());
+	}	
+    }
+    
+    private static BufferedImage kmeans_helper(BufferedImage originalImage, int k){
+	int w=originalImage.getWidth();
+	int h=originalImage.getHeight();
+	BufferedImage kmeansImage = new BufferedImage(w,h,originalImage.getType());
+	Graphics2D g = kmeansImage.createGraphics();
+	g.drawImage(originalImage, 0, 0, w,h , null);
+	// Read rgb values from the image
+	int[] rgb=new int[w*h];
+	int count=0;
+	for(int i=0;i<w;i++){
+	    for(int j=0;j<h;j++){
+		rgb[count++]=kmeansImage.getRGB(i,j);
+	    }
+	}
+	// Call kmeans algorithm: update the rgb values
+	kmeans(rgb,k);
+
+	// Write the new rgb values to the image
+	count=0;
+	for(int i=0;i<w;i++){
+	    for(int j=0;j<h;j++){
+		kmeansImage.setRGB(i,j,rgb[count++]);
+	    }
+	}
+	return kmeansImage;
+    }
+
+    // Your k-means code goes here
+    // Update the array rgb by assigning each entry in the rgb array to its cluster center
+    private static void kmeans(int[] rgb, int k) {
+
+    	Color[] pixels = new Color[rgb.length];
+    	for(int i = 0; i < rgb.length; i++) {
+    		pixels[i] = new Color(rgb[i]);
+    	}
+    	
+    	Set<Integer> uniqueColors = new HashSet<Integer>();
+    	for(int i = 0; i < rgb.length; i++) {
+    		uniqueColors.add(rgb[i]);
+    	}
+    	log("Distinct Colors in input image: "+uniqueColors.size());
+    	if(uniqueColors.size() < k) {
+    		log("The input image has only "+uniqueColors.size()+" distinct colors. Therefore, reducing value of k to "+uniqueColors.size());
+    		k = uniqueColors.size();
+    	}
+    	List<Integer> uColors = new ArrayList<Integer>(uniqueColors);
+    	
+    	Cluster[] clusters = new Cluster[k];
+    	for(int i = 0; i < k; i++) {
+    		clusters[i] = new Cluster(new Color(uColors.get((int)Math.floor(Math.random()*uColors.size()))));
+    		boolean distinct = false;
+    		while(!distinct) {
+    			int j = 0;
+	    		while(j < i) {
+	    			if(clusters[i].mean.equals(clusters[j].mean)) {
+	    				clusters[i].mean = new Color(uColors.get((int)Math.floor(Math.random()*uColors.size())));
+	    				break;
+	    			}
+	    			j++;
+	    		}
+    			if(j == i) {
+    	    		distinct = true;
+    			}
+    		}
+    	}
+    	
+    	int cnt = 0;
+    	do {
+    		clearClusterPixels(clusters);
+    		populateClusters(clusters, pixels);
+    		cnt++;
+    		if(cnt%10 == 0) {
+    			log("# iterations done: "+cnt);
+    		}
+    	} while(!computeMeanForClusters(clusters, pixels));
+    	
+    	for(int i = 0; i < clusters.length; i++) {
+    		for(int j: clusters[i].pixels) {
+    			rgb[j] = clusters[i].mean.getRGB();
+    		}
+    	}
+    }
+    
+    private static void clearClusterPixels(Cluster[] clusters) {
+    	for(int i = 0; i < clusters.length; i++) {
+    		clusters[i].resetPixels();
+    	}
+    }
+    
+    private static void populateClusters(Cluster[] clusters, Color[] pixels) {
+    	for(int i = 0; i < pixels.length; i++) {
+    		Cluster chosenCluster = null;
+    		int minDist = Integer.MAX_VALUE, dist = 0;
+    		for(int j = 0; j < clusters.length; j++) {
+    			dist = (int) (Math.pow(pixels[i].getRed() - clusters[j].mean.getRed(), 2)
+    					+ Math.pow(pixels[i].getGreen() - clusters[j].mean.getGreen(), 2)
+    					+ Math.pow(pixels[i].getBlue() - clusters[j].mean.getBlue(), 2));
+    			if(dist < minDist) {
+    				minDist = dist;
+    				chosenCluster = clusters[j];
+    			}
+    		}
+    		chosenCluster.pixels.add(i);
+    	}
+    }
+    
+    private static boolean computeMeanForClusters(Cluster[] clusters, Color[] pixels) {
+    	boolean done = true;
+    	for(int i = 0; i < clusters.length; i++) {
+    		int rSum = 0, gSum = 0, bSum = 0;
+    		for(int j: clusters[i].pixels) {
+    			rSum = rSum + pixels[j].getRed();
+    			gSum = gSum + pixels[j].getGreen();
+    			bSum = bSum + pixels[j].getBlue();
+    		}
+    		Color newMean = new Color(rSum/clusters[i].pixels.size(), gSum/clusters[i].pixels.size(), bSum/clusters[i].pixels.size());
+    		if(!clusters[i].mean.equals(newMean))
+    			done = false;
+    		clusters[i].mean = newMean;
+    	}
+    	return done;
+    }
+
+    private static void log(String message) {
+    	System.out.println(message);
+    }
+    
+}

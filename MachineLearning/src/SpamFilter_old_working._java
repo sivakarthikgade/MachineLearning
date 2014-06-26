@@ -1,0 +1,371 @@
+package org.siva.machinelearning;
+
+import java.io.BufferedReader;
+import java.io.BufferedWriter;
+import java.io.File;
+import java.io.FileReader;
+import java.io.FileWriter;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+
+/**document encoding
+ * white space meaning
+ * truecasing
+ * language ?
+ * @author sivakarthik
+ *
+ */
+
+enum Class {
+	SPAM,
+	HAM
+}
+
+enum Classifier {
+	NAIVE_BAYES,
+	LOGISTIC_REGRESSION
+}
+
+public class SpamFilter {
+	
+	private String trainingFolder = null;
+	private String testFolder = null;
+	private Classifier classifier = null;
+	private Set<String> vocabulary = new HashSet<String>();
+	private Map<Class, Integer> docCntPerClass = new HashMap<Class, Integer>();
+	private Map<Class, Double> prior = new HashMap<Class, Double>();
+	private Map<Class, Map<String, Integer>> tokenCounts = new HashMap<Class, Map<String, Integer>>();
+	private Map<Class, Map<String, Double>> tokenCondProb = new HashMap<Class, Map<String, Double>>();
+	
+	public SpamFilter() {
+		System.out.println("In the constructor of SpamFilter");
+	}
+	
+	public SpamFilter(String trainingFolder, String testFolder, Classifier classifier) {
+		this.trainingFolder = trainingFolder;
+		this.testFolder = testFolder;
+		this.classifier = classifier;
+	}
+	
+	public Map<Class, Double> getPrior() {
+		return prior;
+	}
+
+	public void setPrior(Map<Class, Double> prior) {
+		this.prior = prior;
+	}
+
+	public Map<Class, Integer> getDocCntPerClassifier() {
+		return docCntPerClass;
+	}
+
+	public void setDocCntPerClassifier(Map<Class, Integer> docCntPerClassifier) {
+		this.docCntPerClass = docCntPerClassifier;
+	}
+
+	public Set<String> getVocabulary() {
+		return vocabulary;
+	}
+
+	public void setVocabulary(Set<String> vocabulary) {
+		this.vocabulary = vocabulary;
+	}
+
+	public Map<Class, Map<String, Double>> getTokenCondProb() {
+		return tokenCondProb;
+	}
+
+	public void setTokenCondProb(Map<Class, Map<String, Double>> tokenCondProb) {
+		this.tokenCondProb = tokenCondProb;
+	}
+
+	public Map<Class, Map<String, Integer>> getTokenCounts() {
+		return tokenCounts;
+	}
+
+	public void setTokenCounts(Map<Class, Map<String, Integer>> tokenCounts) {
+		this.tokenCounts = tokenCounts;
+	}
+
+	public Classifier getClassifier() {
+		return classifier;
+	}
+
+	public void setClassifier(Classifier classifier) {
+		this.classifier = classifier;
+	}
+
+	public String getTrainingFolder() {
+		return trainingFolder;
+	}
+
+	public void setTrainingFolder(String trainingFolder) {
+		this.trainingFolder = trainingFolder;
+	}
+
+	public String getTestFolder() {
+		return testFolder;
+	}
+
+	public void setTestFolder(String testFolder) {
+		this.testFolder = testFolder;
+	}
+	
+	
+	public void trainMultiNomial() throws Exception {
+		if(Classifier.NAIVE_BAYES == getClassifier()) {
+			File folder = null;
+			
+			folder = new File(getTrainingFolder()+File.separator+Class.SPAM);
+			getDocCntPerClassifier().put(Class.SPAM, folder.listFiles().length);
+			
+			folder = new File(getTrainingFolder()+File.separator+Class.HAM);
+			getDocCntPerClassifier().put(Class.HAM, folder.listFiles().length);
+
+			getPrior().put(Class.SPAM, (double)getDocCntPerClassifier().get(Class.SPAM)/(getDocCntPerClassifier().get(Class.SPAM) + getDocCntPerClassifier().get(Class.HAM)));
+			getPrior().put(Class.HAM, (double)getDocCntPerClassifier().get(Class.HAM)/(getDocCntPerClassifier().get(Class.SPAM) + getDocCntPerClassifier().get(Class.HAM)));
+
+			trainMultiNomialNB(null);
+		} else if(Classifier.LOGISTIC_REGRESSION == getClassifier()) {
+			trainMultiNomialLR();
+		}
+	}
+	
+	private void trainMultiNomialNB(String folderPath) throws Exception {
+		
+		if(folderPath == null || folderPath.length() == 0) {
+			for(Class c: Class.values()) {
+				trainMultiNomialNB(getTrainingFolder()+File.separator+c);
+			}
+			
+			for(Class c: Class.values()) {
+				computeCondProbForClassNB(c);
+			}
+			
+			return;
+		}
+		
+		String filePath = null;
+		File folder = null;
+		File[] listOfFiles = null;
+		String fileText = null, str = null;
+		BufferedReader br = null;
+		
+		folder = new File(folderPath);
+		listOfFiles = folder.listFiles();
+		
+		for(int i = 0; i < listOfFiles.length; i++) {
+			fileText = "";
+			if(listOfFiles[i].isFile()) {
+				filePath = listOfFiles[i].getAbsolutePath();
+				br = new BufferedReader(new FileReader(filePath));
+				while((str = br.readLine()) != null) {
+					fileText = fileText + " " + str;
+				}
+				br.close();
+				fileText = fileText.toLowerCase();
+				fileText = fileText.replaceAll("[^a-z]", " ");
+				getVocabulary().addAll(Arrays.asList(fileText.toLowerCase().split("[\\s]+")));
+			}
+		}
+	}
+
+	private void computeCondProbForClassNB(Class c) throws Exception {
+
+		getTokenCounts().put(c, new HashMap<String, Integer>());
+		getTokenCondProb().put(c, new HashMap<String, Double>());
+		
+		String filePath = null;
+		File folder = null;
+		File[] listOfFiles = null;
+		String fileText = null, str = null;
+		BufferedReader br = null;
+		List<String> tokensInClass = new ArrayList<String>();
+		int tokenCnt = 0, totalTokenCnt = 0;
+		
+		folder = new File(getTestFolder()+File.separator+c.name());
+		listOfFiles = folder.listFiles();
+		
+		for(int i = 0; i < listOfFiles.length; i++) {
+			if(listOfFiles[i].isFile()) {
+				fileText = "";
+				filePath = listOfFiles[i].getAbsolutePath();
+				br = new BufferedReader(new FileReader(filePath));
+				while((str = br.readLine()) != null) {
+					fileText = fileText + " " + str;
+				}
+				br.close();
+				fileText = fileText.toLowerCase();
+				fileText = fileText.replaceAll("[^a-z]", " ");
+				tokensInClass.addAll(Arrays.asList(fileText.toLowerCase().split("[\\s]+")));
+			}
+		}
+		
+		for(String word: vocabulary) {
+			tokenCnt = 0;
+			for(String token: tokensInClass) {
+				if(word.equals(token))
+					tokenCnt++;
+			}
+			totalTokenCnt = totalTokenCnt + tokenCnt + 1;
+			getTokenCounts().get(c).put(word, tokenCnt+1);
+		}
+		
+		for(String word: vocabulary) {
+			getTokenCondProb().get(c).put(word, (double)getTokenCounts().get(c).get(word)/totalTokenCnt);
+		}
+	}
+	
+	private void trainMultiNomialLR() throws Exception {
+		
+	}
+
+	
+	public void testMultiNomial() throws Exception {
+		if(Classifier.NAIVE_BAYES == getClassifier()) {
+			int correctCnt = testMultiNomialNB(null);
+			int totalTestDocCnt = 0;
+			for(Class c: Class.values())
+				totalTestDocCnt+=(new File(getTestFolder()+File.separator+c)).listFiles().length;
+			System.out.println("Total documents processed: "+totalTestDocCnt);
+			System.out.println("Total correctly classified documents: "+correctCnt);
+		} else if(Classifier.LOGISTIC_REGRESSION == getClassifier())
+			testMultiNomialLR();
+	}
+	
+	private int testMultiNomialNB(String folderPath) throws Exception {
+		int correctCnt = 0;
+		Class expectedClass = null;
+		
+		if(folderPath == null || folderPath.length() == 0) {
+			for(Class c: Class.values())
+				correctCnt+=testMultiNomialNB(getTestFolder()+File.separator+c);
+			System.out.println("correct count in if: "+correctCnt);
+			return correctCnt;
+		}
+		
+		if(folderPath.substring(folderPath.lastIndexOf(File.separator)+1).equalsIgnoreCase(Class.SPAM.name()))
+			expectedClass = Class.SPAM;
+		else if(folderPath.substring(folderPath.lastIndexOf(File.separator)+1).equalsIgnoreCase(Class.HAM.name()))
+			expectedClass = Class.HAM;
+		
+		File folder = new File(folderPath);
+		File[] listOfFiles = folder.listFiles();
+		String filePath = null;
+		String fileText = null, str = null;
+		BufferedReader br = null;
+		List<String> tokensInDoc = null;
+		double probability = 0, maxProbability = 0;
+		Class actualClass = null;
+	
+		for(int i = 0; i < listOfFiles.length; i++) {
+			if(listOfFiles[i].isFile()) {
+				fileText = "";
+				filePath = listOfFiles[i].getAbsolutePath();
+				br = new BufferedReader(new FileReader(filePath));
+				while((str = br.readLine()) != null) {
+					fileText = fileText + " " + str;
+				}
+				br.close();
+				tokensInDoc = new ArrayList<String>();
+				fileText = fileText.toLowerCase();
+				fileText = fileText.replaceAll("[^a-z]", " ");
+				tokensInDoc.addAll(Arrays.asList(fileText.toLowerCase().split("[\\s]+")));
+				
+				actualClass = null;
+				maxProbability = 0;
+				for(Class c: Class.values()) {
+					probability = Math.log10(getPrior().get(c))/Math.log10(2);
+					for(String token: tokensInDoc) {
+						probability = probability + (getTokenCondProb().get(c).get(token)==null ? 0 : Math.log10(getTokenCondProb().get(c).get(token))/Math.log10(2));
+					}
+					if(actualClass == null || (probability > maxProbability)) {
+						maxProbability = probability;
+						actualClass = c;
+					}
+				}
+				
+				//System.out.println("actualClass: "+actualClass.name()+". expectedClass: "+expectedClass.name());
+				if(actualClass == expectedClass)
+					correctCnt++;
+			}
+		}
+
+		System.out.println("correct count in class "+ expectedClass.name() + ": "+correctCnt);
+		return correctCnt;
+	}
+
+	private void testMultiNomialLR() throws Exception {
+		
+	}
+
+	
+	public void applyMultiNomial() throws Exception {
+		if(Classifier.NAIVE_BAYES == getClassifier())
+			applyMultiNomialNB();
+		else if(Classifier.LOGISTIC_REGRESSION == getClassifier())
+			applyMultiNomialLR();
+	}
+	
+	private void applyMultiNomialNB() throws Exception {
+		
+	}
+
+	private void applyMultiNomialLR() throws Exception {
+		
+	}
+
+
+	public static void main(String[] args) throws Exception {
+		String trainingFolder = "C:\\Users\\sivakarthik\\Desktop\\Higher Studies\\STUDY\\MachineLearning\\UTD_Course\\HomeworkAssignments\\HomeWork2\\test";
+		String testFolder = "C:\\Users\\sivakarthik\\Desktop\\Higher Studies\\STUDY\\MachineLearning\\UTD_Course\\HomeworkAssignments\\HomeWork2\\test";
+		String clsf = "nb";
+		Classifier classifier = null;
+		
+		if("nb".equalsIgnoreCase(clsf))
+			classifier = Classifier.NAIVE_BAYES;
+		else if("lr".equalsIgnoreCase(clsf))
+			classifier = Classifier.LOGISTIC_REGRESSION;
+		
+		SpamFilter filter = new SpamFilter(trainingFolder, testFolder, classifier);
+		filter.trainMultiNomial();
+		filter.testMultiNomial();
+		System.out.println("THE END!! Results Time:");
+		System.out.println("Total Vocab Count: "+filter.getVocabulary().size());
+		System.out.println("SPAM Prior: "+filter.getPrior().get(Class.SPAM));
+		System.out.println("HAM Prior: "+filter.getPrior().get(Class.HAM));
+//		System.out.println("Total Vocab in a Class: "+filter.getTokenCondProb().get(Class.SPAM).size());
+//		System.out.println("cond prob value (spam, the): "+filter.getTokenCondProb().get(Class.SPAM).get("the"));
+//		System.out.println("cond prob value (spam, of): "+filter.getTokenCondProb().get(Class.SPAM).get("of"));
+//		System.out.println("cond prob value (ham, the): "+filter.getTokenCondProb().get(Class.HAM).get("the"));
+//		System.out.println("cond prob value (ham, of): "+filter.getTokenCondProb().get(Class.HAM).get("of"));
+		filter.logData();
+	}
+	
+	private void logData() throws Exception {
+		BufferedWriter bw = new BufferedWriter(new FileWriter("spam_filter.txt"));
+		for(String word: getVocabulary()) {
+			bw.write(word);
+			bw.newLine();
+		}
+		bw.flush();
+		
+		for(Class c: Class.values()) {
+			bw.newLine();
+			bw.write("Class "+c.name()+" stats:");
+			bw.newLine();
+			Map<String, Double> vCondProb = getTokenCondProb().get(c);
+			for(String word: getVocabulary()) {
+				bw.write(word+":"+vCondProb.get(word));
+				bw.newLine();
+			}
+		}
+		bw.close();
+	}
+
+}

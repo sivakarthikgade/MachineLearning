@@ -1,0 +1,169 @@
+package org.siva.machinelearning;
+
+import java.io.BufferedReader;
+import java.io.BufferedWriter;
+import java.io.FileReader;
+import java.io.FileWriter;
+import java.util.HashMap;
+import java.util.Map;
+
+public class CollaborativeFiltering {
+
+	private static final String LOG_FILE = "CollaborativeFiltering_Log.txt";
+	private BufferedWriter bw = null;
+	public String trainFile;
+	public String testFile;
+	public Map<Double,Map<Double,Double>> v, vt, tv;
+	public Map<Double,Double> w, vAvg;
+	
+	public CollaborativeFiltering(String trainFile, String testFile) {
+		this.trainFile = trainFile;
+		this.testFile = testFile;
+		v = new HashMap<Double,Map<Double,Double>>();
+		vt = new HashMap<Double,Map<Double,Double>>();
+		tv = new HashMap<Double,Map<Double,Double>>();
+		vAvg = new HashMap<Double,Double>();
+	}
+	
+	public void execute() throws Exception {
+		String str = null;
+		String[] tokens;
+
+		BufferedReader br = new BufferedReader(new FileReader(trainFile));
+		while((str = br.readLine()) != null) {
+			tokens = str.split("[,\\s]+");
+			if(!v.containsKey(Double.parseDouble(tokens[1]))) {
+				v.put(Double.parseDouble(tokens[1]), new HashMap<Double,Double>());
+			}
+			v.get(Double.parseDouble(tokens[1])).put(Double.parseDouble(tokens[0]), Double.parseDouble(tokens[2]));
+		}
+		br.close();
+		log("users size in train set: "+v.keySet().size());
+		
+		for(double user: v.keySet()) {
+			Map<Double,Double> rateList = v.get(user);
+			double sum = 0, cnt = 0, avg = 0;
+			cnt = rateList.size();
+			for(double movie: rateList.keySet()) {
+				sum = sum + rateList.get(movie);
+			}
+			avg = sum/cnt;
+			vAvg.put(user,avg);
+		}
+		log("vAvg size: "+vAvg.size());
+		
+		v = null;
+		br = new BufferedReader(new FileReader(trainFile));
+		while((str = br.readLine()) != null) {
+			tokens = str.split("[,\\s]+");
+			if(!vt.containsKey(Double.parseDouble(tokens[0]))) {
+				vt.put(Double.parseDouble(tokens[0]), new HashMap<Double,Double>());
+			}
+			vt.get(Double.parseDouble(tokens[0])).put(Double.parseDouble(tokens[1]), Double.parseDouble(tokens[2]));
+		}
+		br.close();
+		log("movies size in train set: "+vt.keySet().size());
+
+		br = new BufferedReader(new FileReader(testFile));
+		while((str = br.readLine()) != null) {
+			tokens = str.split("[,\\s]+");
+			if(!tv.containsKey(Double.parseDouble(tokens[1]))) {
+				tv.put(Double.parseDouble(tokens[1]), new HashMap<Double,Double>());
+			}
+			tv.get(Double.parseDouble(tokens[1])).put(Double.parseDouble(tokens[0]), Double.parseDouble(tokens[2]));
+		}
+		br.close();
+		log("users size in test set: "+tv.keySet().size());
+		
+		double MAE = 0, Accuracy = 0, procTestSamplesCnt = 0, Paj = 0, k = 0, sum = 0, weight = 0; 
+		for(double a: tv.keySet()) {
+			if(vAvg.get(a) == null) {
+				log("Test Sample Cnt: "+procTestSamplesCnt+". No training data available for user a:"+a);
+				continue;
+			}
+			w = new HashMap<Double,Double>();
+			for(double j: tv.get(a).keySet()) {
+				procTestSamplesCnt++;
+				Paj = vAvg.get(a);
+				if(vt.get(j) != null) {
+					k = 0; sum = 0;
+					for(double i: vt.get(j).keySet()) {
+						if(w.get(i) != null) {
+							weight = w.get(i);
+						} else {
+							weight = computeWeight(a,i);
+						}
+						k = k + weight;
+						sum = sum + weight*(vt.get(j).get(i) - vAvg.get(i));
+					}
+					if(k != 0) {
+						Paj = Paj + (sum/k);
+					}
+				}
+				MAE = MAE + Math.abs(Paj - tv.get(a).get(j));
+				Accuracy = Accuracy + Math.abs(Paj/tv.get(a).get(j));
+				log("Test Sample Cnt: "+procTestSamplesCnt+", MAE: "+(MAE/procTestSamplesCnt)+", Accuracy: "+(Accuracy*100/procTestSamplesCnt));
+			}
+			flushLogger();
+		}
+	}
+	
+	private double computeWeight(double a, double i) {
+		double d1 = 0, d2 = 0, n1 = 0, val = 0;
+		
+		for(double j: vt.keySet()) {
+			if(vt.get(j).get(a) != null && vt.get(j).get(i) != null) {
+				d1 = d1 + Math.pow(vt.get(j).get(a) - vAvg.get(a),2);
+				d2 = d2 + Math.pow(vt.get(j).get(i) - vAvg.get(i),2);
+				n1 = n1 + (vt.get(j).get(a) - vAvg.get(a))*(vt.get(j).get(i) - vAvg.get(i));
+			}
+		}
+		if(n1 == 0 || d1 == 0 || d2 == 0) {
+			val = 0;
+		} else {
+			val = n1/Math.sqrt(d1*d2);
+		}
+		
+		w.put(i, val);
+		
+		return val;
+	}
+	
+	public static void main(String[] args) throws Exception {
+		double startTime = System.currentTimeMillis();
+
+		String trainFile = args[0];
+		String testFile = args[1];
+
+		CollaborativeFiltering filter = new CollaborativeFiltering(trainFile, testFile);
+		filter.initializeLogger(false);
+		try {
+			filter.execute();
+			filter.log("CollaborativeFiltering: Total execution time->"+((double)(System.currentTimeMillis()-startTime)/1000)+" secs.");
+		} catch(Exception e) {
+			throw e;
+		} finally {
+			filter.flushLogger();
+			filter.closeLogger();
+		}
+	}
+
+	private void initializeLogger(boolean append) throws Exception {
+		bw = new BufferedWriter(new FileWriter(CollaborativeFiltering.LOG_FILE, append));
+	}
+	
+	private void log(String str) throws Exception {
+		System.out.println(str);
+		bw.write(str);
+		bw.newLine();
+	}
+	
+	private void flushLogger() throws Exception {
+		bw.flush();
+	}
+	
+	private void closeLogger() throws Exception {
+		bw.flush();
+		bw.close();
+	}
+}
